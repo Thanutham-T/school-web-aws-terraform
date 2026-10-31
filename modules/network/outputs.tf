@@ -51,6 +51,19 @@ output "private_subnet_ids" {
 }
 
 # ------------------------------------------------------------------
+# Output: subnet_ids
+# Description: List of all public and private subnet IDs.
+# Consumers: Modules that need every subnet in the VPC.
+# ------------------------------------------------------------------
+output "subnet_ids" {
+  description = "List of IDs of all public and private subnets."
+  value = concat(
+    [for subnet in aws_subnet.public : subnet.id],
+    [for subnet in aws_subnet.private : subnet.id]
+  )
+}
+
+# ------------------------------------------------------------------
 # Output: public_route_table_id
 # Description: The ID of the public route table.
 # Consumers: Advanced networking modules needing explicit RT association.
