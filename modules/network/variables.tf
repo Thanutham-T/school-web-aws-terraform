@@ -60,3 +60,38 @@ variable "availability_zones" {
   default     = ["ap-southeast-1a", "ap-southeast-1b"]
 }
 
+# ------------------------------------------------------------------
+# Variable: app_port
+# Purpose: Port used for HTTP app traffic.
+# Type: number
+# Default: 80
+# ------------------------------------------------------------------
+variable "app_port" {
+  description = "Port used for HTTP app traffic"
+  type        = number
+  default     = 80
+}
+
+# ------------------------------------------------------------------
+# Variable: https_port
+# Purpose: Port used for HTTPS app traffic.
+# Type: number
+# Default: 443
+# ------------------------------------------------------------------
+variable "https_port" {
+  description = "Port used for HTTPS app traffic"
+  type        = number
+  default     = 443
+}
+
+# ------------------------------------------------------------------
+# Variable: db_port
+# Purpose: Port used for MySQL database traffic.
+# Type: number
+# Default: 3306
+# ------------------------------------------------------------------
+variable "db_port" {
+  description = "Port used for MySQL database traffic"
+  type        = number
+  default     = 3306
+}
