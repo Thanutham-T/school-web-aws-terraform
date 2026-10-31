@@ -53,16 +53,19 @@ module "network" {
 * Private subnets have **no direct internet access**; outbound via NAT gateway.
 
 ### Network ACLs
-Three stateless Network ACLs are created and attached to the corresponding subnet groups:
+Three stateless Network ACLs are created and **attached to their subnets using the actual subnet IDs** (`[for s in aws_subnet.public : s.id]` for public, `[for s in aws_subnet.private : s.id if s.tags.Tier == "app"]` for app, and `[for s in aws_subnet.private : s.id if s.tags.Tier == "db"]` for db), ensuring compliance with **CKV2_AWS_1**.
 
 #### Public NACL (`aws_network_acl.public`)
 | Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
 |-----------------|-----------|----------|------------|------|--------|
 | `public_in_https_from_anywhere` | ingress | tcp | 443 | 0.0.0.0/0 | Allow HTTPS from Internet to public subnets (e.g., CloudFront → ALB) |
-| `public_in_ephemeral_from_anywhere` | ingress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow return traffic on ephemeral ports |
+| `public_in_ephemeral_from_anywhere_low` | ingress | tcp | 1024‑3388 | 0.0.0.0/0 | Allow return traffic on low‑ephemeral ports (excludes RDP 3389) |
+| `public_in_ephemeral_from_anywhere_high` | ingress | tcp | 3390‑65535 | 0.0.0.0/0 | Allow return traffic on high‑ephemeral ports (excludes RDP 3389) |
 | `public_out_http_to_app` | egress | tcp | 80 | each app subnet CIDR | Allow HTTP from public subnets to app subnets (ALB → App) |
 | `public_out_https_to_anywhere` | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS from public subnets (e.g., NAT GW → Internet) |
 | `public_out_ephemeral_to_anywhere` | egress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow outbound ephemeral return traffic |
+
+*The inbound ephemeral‑port rule was split into two rules (110 & 111) to explicitly deny TCP 3389 (RDP), satisfying Checkov policy **CKV_AWS_231**.*
 
 #### App NACL (`aws_network_acl.app`)
 | Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
