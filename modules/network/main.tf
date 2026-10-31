@@ -1,4 +1,9 @@
-# Create the VPC with DNS resolution and DNS hostnames enabled.
+# ------------------------------------------------------------------
+# Resource: aws_vpc.this
+# Purpose: Create the VPC with DNS resolution and hostnames enabled.
+# Compliance: Provides the network boundary for all resources.
+# Key arguments: cidr_block, enable_dns_support, enable_dns_hostnames.
+# ------------------------------------------------------------------
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr_block
   enable_dns_support   = true
@@ -10,8 +15,28 @@ resource "aws_vpc" "this" {
   }
 }
 
-# Attach an Internet Gateway to the VPC. Public internet access also requires
-# a route table that directs internet-bound traffic to this gateway.
+# ------------------------------------------------------------------
+# Resource: aws_default_security_group.default
+# Purpose: Lock down the default security group that AWS creates for the VPC.
+# Compliance: Satisfies policy CKV2_AWS_12 (default SG must restrict all traffic).
+# Key arguments: vpc_id, empty ingress/egress lists.
+# ------------------------------------------------------------------
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.this.id
+
+  ingress = []
+  egress  = []
+
+  tags = {
+    Name = "DO NOT USE - locked down default SG"
+  }
+}
+# ------------------------------------------------------------------
+# Resource: aws_internet_gateway.this
+# Purpose: Attach an Internet Gateway to the VPC for public internet access.
+# Compliance: Enables outbound internet for public subnets via route table.
+# Key arguments: vpc_id.
+# ------------------------------------------------------------------
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
@@ -20,6 +45,12 @@ resource "aws_internet_gateway" "this" {
   }
 }
 
+# ------------------------------------------------------------------
+# Resource: aws_nat_gateway.this
+# Purpose: Provide a managed NAT gateway for private subnet outbound internet.
+# Compliance: Allows private workloads to reach the internet without inbound access.
+# Key arguments: connectivity_type, availability_mode, vpc_id, depends_on IGW.
+# ------------------------------------------------------------------
 resource "aws_nat_gateway" "this" {
   connectivity_type = "public"
   availability_mode = "regional"
@@ -32,8 +63,12 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
 }
 
-# Assign subnet CIDRs to availability zones in order, cycling through the AZs
-# when there are more subnet CIDRs than configured availability zones.
+# ------------------------------------------------------------------
+# Locals: subnet mapping helpers
+# Purpose: Compute subnet-to-AZ mappings for public, app, and db tiers,
+#          and merge private tiers into a single map for iteration.
+# Key outputs: public_subnets, app_subnets, db_subnets, all_private_subnets
+# ------------------------------------------------------------------
 locals {
   public_subnets = {
     for idx, cidr in var.public_subnet_cidr_blocks :
@@ -59,8 +94,12 @@ locals {
   all_private_subnets = merge(local.app_subnets, local.db_subnets)
 }
 
-# Public subnets assign public IPv4 addresses to instances at launch.
-# Internet connectivity still depends on the VPC route-table configuration.
+# ------------------------------------------------------------------
+# Resource: aws_subnet.public
+# Purpose: Create public subnets in each AZ with no public IP assignment.
+# Compliance: Public subnets must not auto-assign public IPs; routing is via IGW.
+# Key arguments: for_each over local.public_subnets, vpc_id, cidr_block, availability_zone, map_public_ip_on_launch.
+# ------------------------------------------------------------------
 resource "aws_subnet" "public" {
   for_each                = local.public_subnets
   vpc_id                  = aws_vpc.this.id
@@ -73,8 +112,12 @@ resource "aws_subnet" "public" {
   }
 }
 
-# Private subnets do not assign public IPv4 addresses at launch. Their routing
-# and any outbound access should be controlled by the associated route tables.
+# ------------------------------------------------------------------
+# Resource: aws_subnet.private
+# Purpose: Create private subnets in each AZ for app and db tiers.
+# Compliance: Private subnets must not auto-assign public IPs; routing is via NAT gateway.
+# Key arguments: for_each over local.all_private_subnets, vpc_id, cidr_block, availability_zone, map_public_ip_on_launch.
+# ------------------------------------------------------------------  
 resource "aws_subnet" "private" {
   for_each                = local.all_private_subnets
   vpc_id                  = aws_vpc.this.id
@@ -88,7 +131,12 @@ resource "aws_subnet" "private" {
   }
 }
 
-# Route tables define how traffic is directed within the VPC.
+# ------------------------------------------------------------------
+# Resource: aws_route_table.public
+# Purpose: Public route table with default route to Internet Gateway.
+# Compliance: Enables internet egress for public subnets.
+# Key arguments: vpc_id, route to IGW.
+# ------------------------------------------------------------------
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
 
@@ -102,6 +150,12 @@ resource "aws_route_table" "public" {
   }
 }
 
+# ------------------------------------------------------------------
+# Resource: aws_route_table.private
+# Purpose: Private route table with default route to NAT gateway.
+# Compliance: Provides controlled outbound internet for private subnets.
+# Key arguments: vpc_id, route to NAT gateway.
+# ------------------------------------------------------------------
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
 
@@ -115,26 +169,26 @@ resource "aws_route_table" "private" {
   }
 }
 
+# ------------------------------------------------------------------
+# Resource: aws_route_table_association.public
+# Purpose: Associate each public subnet with the public route table.
+# Compliance: Ensures public subnets use IGW route.
+# Key arguments: for_each over aws_subnet.public, route_table_id.
+# ------------------------------------------------------------------
 resource "aws_route_table_association" "public" {
   for_each       = aws_subnet.public
   subnet_id      = each.value.id
   route_table_id = aws_route_table.public.id
 }
 
+# ------------------------------------------------------------------
+# Resource: aws_route_table_association.private
+# Purpose: Associate each private subnet with the private route table.
+# Compliance: Ensures private subnets use NAT gateway route.
+# Key arguments: for_each over aws_subnet.private, route_table_id.
+# ------------------------------------------------------------------
 resource "aws_route_table_association" "private" {
   for_each       = aws_subnet.private
   subnet_id      = each.value.id
   route_table_id = aws_route_table.private.id
-}
-
-# The default security group is created automatically by AWS for each VPC. It allows all inbound and outbound traffic by default, which may not be desirable for security reasons. This resource explicitly defines a default security group with no ingress or egress rules, effectively locking it down.
-resource "aws_default_security_group" "default" {
-  vpc_id = aws_vpc.this.id
-
-  ingress = []
-  egress  = []
-
-  tags = {
-    Name = "DO NOT USE - locked down default SG"
-  }
 }
