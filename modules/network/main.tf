@@ -458,7 +458,7 @@ resource "aws_network_acl" "db" {
   vpc_id     = aws_vpc.this.id
   subnet_ids = keys(local.db_subnets)
   tags = {
-    Name = "${var.project}-db-nacl"
+    Name = "${var.project}-db-network-acl"
   }
 }
 
