@@ -10,6 +10,7 @@ This Terraform module provisions a foundational AWS network layout:
 * **Public subnets** (configurable CIDRs) – no auto‑assign public IP.
 * **Private subnets** split into **app** and **db** tiers.
 * **Route tables** (public → IGW, private → NAT) and **associations**.
+* **Network ACLs** for public, app, and db subnets with explicit inbound/outbound rules (HTTPS, HTTP, MySQL, ephemeral ports) – stateless defense‑in‑depth.
 
 The module is designed to be reusable across environments and projects.
 
@@ -51,6 +52,38 @@ module "network" {
 * All resources tagged with `Project`, `Environment`, `ManagedBy` for governance.  
 * Private subnets have **no direct internet access**; outbound via NAT gateway.
 
+### Network ACLs
+Three stateless Network ACLs are created and attached to the corresponding subnet groups:
+
+#### Public NACL (`aws_network_acl.public`)
+| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
+|-----------------|-----------|----------|------------|------|--------|
+| `public_in_https_from_anywhere` | ingress | tcp | 443 | 0.0.0.0/0 | Allow HTTPS from Internet to public subnets (e.g., CloudFront → ALB) |
+| `public_in_ephemeral_from_anywhere` | ingress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow return traffic on ephemeral ports |
+| `public_out_http_to_app` | egress | tcp | 80 | each app subnet CIDR | Allow HTTP from public subnets to app subnets (ALB → App) |
+| `public_out_https_to_anywhere` | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS from public subnets (e.g., NAT GW → Internet) |
+| `public_out_ephemeral_to_anywhere` | egress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow outbound ephemeral return traffic |
+
+#### App NACL (`aws_network_acl.app`)
+| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
+|-----------------|-----------|----------|------------|------|--------|
+| `app_in_http_from_public` | ingress | tcp | 80 | each public subnet CIDR | Allow HTTP from public subnets (ALB → App) |
+| `app_in_ephemeral_from_public` | ingress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral return traffic from public subnets |
+| `app_in_ephemeral_from_db` | ingress | tcp | 1024‑65535 | each db subnet CIDR | Allow ephemeral traffic from db subnets |
+| `app_out_https_to_anywhere` | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS (App → NAT GW → Internet) |
+| `app_out_mysql_to_db` | egress | tcp | 3306 | each db subnet CIDR | Allow MySQL from app to db subnets |
+| `app_out_ephemeral_to_public` | egress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral return traffic to public subnets |
+
+#### DB NACL (`aws_network_acl.db`)
+| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
+|-----------------|-----------|----------|------------|------|--------|
+| `db_in_mysql_from_app` | ingress | tcp | 3306 | each app subnet CIDR | Allow MySQL from app subnets |
+| `db_out_ephemeral_to_app` | egress | tcp | 1024‑65535 | each app subnet CIDR | Allow ephemeral return traffic to app subnets |
+
+*Rule numbers are generated deterministically (`100 + index(...)`) so ordering is stable across applies. CIDR sources/destinations are driven by the same `local.*_subnets` maps used for subnet creation, ensuring automatic updates when CIDR blocks change.*
+
+> **Tip** – To add extra ports (e.g., TCP 8080 for a side‑car proxy) extend the `local.app_subnets` / `local.db_subnets` maps or create a new `aws_network_acl_rule` resource that references the same `aws_network_acl.app` / `aws_network_acl.db` IDs. Rule numbers are auto‑calculated, so you only need to choose a free `rule_number` range.
+
 ## Dependencies
 * Terraform **>= 1.17.1**  
 * AWS provider **>= 6.71.0** (`hashicorp/aws`)
@@ -64,11 +97,19 @@ graph TD
   VPC[VPC] --> IGW[Internet Gateway]
   VPC --> NAT[NAT Gateway]
   VPC --> PubSubnets[Public Subnets]
-  VPC --> PrivSubnets[`Private Subnets – app / db`]
+  VPC --> AppSubnets[App Subnets]
+  VPC --> DbSubnets[DB Subnets]
+
   IGW --> PubRT[Public Route Table]
   NAT --> PrivRT[Private Route Table]
+
   PubRT --> PubSubnets
-  PrivRT --> PrivSubnets
+  PrivRT --> AppSubnets
+  PrivRT --> DbSubnets
+
+  PubSubnets -.-> PubNACL[Public NACL]
+  AppSubnets -.-> AppNACL[App NACL]
+  DbSubnets -.-> DbNACL[DB NACL]
 ```
 
 ---  
