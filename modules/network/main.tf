@@ -227,7 +227,7 @@ resource "aws_route_table_association" "private" {
 # ------------------------------------------------------------------
 resource "aws_network_acl" "public" {
   vpc_id     = aws_vpc.this.id
-  subnet_ids = keys(local.public_subnets)
+  subnet_ids = [for s in aws_subnet.public : s.id]
 
   tags = {
     Name = "${var.project}-public-network-acl"
@@ -253,12 +253,11 @@ resource "aws_network_acl_rule" "public_in_https_from_anywhere" {
 }
 
 # ------------------------------------------------------------------
-# Resource: aws_network_acl_rule.public_in_ephemeral_from_anywhere
-# Purpose: Allow inbound ephemeral port traffic from anywhere to public subnets. (Internet return to NATGW)
-# Compliance: Enables communication with public-facing resources on ephemeral ports.
-# Key arguments: network_acl_id, rule_number, egress, protocol, rule_action, cidr_block, from_port, to_port.
+# Resource: aws_network_acl_rule.public_in_ephemeral_from_anywhere_low
+# Purpose: Allow inbound ephemeral port traffic (1024-3388) from anywhere to public subnets.
+# Compliance: Enables return traffic on ephemeral ports while blocking RDP (3389).
 # ------------------------------------------------------------------
-resource "aws_network_acl_rule" "public_in_ephemeral_from_anywhere" {
+resource "aws_network_acl_rule" "public_in_ephemeral_from_anywhere_low" {
   network_acl_id = aws_network_acl.public.id
   rule_number    = 110
   egress         = false
@@ -266,6 +265,22 @@ resource "aws_network_acl_rule" "public_in_ephemeral_from_anywhere" {
   rule_action    = "allow"
   cidr_block     = "0.0.0.0/0"
   from_port      = 1024
+  to_port        = 3388
+}
+
+# ------------------------------------------------------------------
+# Resource: aws_network_acl_rule.public_in_ephemeral_from_anywhere_high
+# Purpose: Allow inbound ephemeral port traffic (3390-65535) from anywhere to public subnets.
+# Compliance: Enables return traffic on ephemeral ports while blocking RDP (3389).
+# ------------------------------------------------------------------
+resource "aws_network_acl_rule" "public_in_ephemeral_from_anywhere_high" {
+  network_acl_id = aws_network_acl.public.id
+  rule_number    = 111
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 3390
   to_port        = 65535
 }
 
@@ -331,7 +346,7 @@ resource "aws_network_acl_rule" "public_out_ephemeral_to_anywhere" {
 # ------------------------------------------------------------------
 resource "aws_network_acl" "app" {
   vpc_id     = aws_vpc.this.id
-  subnet_ids = keys(local.app_subnets)
+  subnet_ids = [for s in aws_subnet.private : s.id if s.tags.Tier == "app"]
 
   tags = {
     Name = "${var.project}-app-network-acl"
@@ -456,7 +471,7 @@ resource "aws_network_acl_rule" "app_out_ephemeral_to_public" {
 # ------------------------------------------------------------------
 resource "aws_network_acl" "db" {
   vpc_id     = aws_vpc.this.id
-  subnet_ids = keys(local.db_subnets)
+  subnet_ids = [for s in aws_subnet.private : s.id if s.tags.Tier == "db"]
   tags = {
     Name = "${var.project}-db-network-acl"
   }
