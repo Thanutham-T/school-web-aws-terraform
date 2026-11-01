@@ -62,3 +62,8 @@ output "flow_log_id" {
   description = "The ID of the VPC flow log, if enabled."
   value       = module.network.flow_log_id
 }
+
+output "security_group_ids" {
+  description = "Map of security group IDs keyed by the security group key."
+  value       = module.security.security_group_ids
+}

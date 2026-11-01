@@ -89,3 +89,22 @@ variable "nacl_dynamic_rules" {
   })))
   default = {}
 }
+variable "security_groups_rules" {
+  description = "Security groups and their rules. Each rule has exactly one source."
+  type = map(object({
+    name        = string
+    description = string
+    rules = map(object({
+      direction         = string
+      description       = optional(string)
+      protocol          = string
+      from_port         = optional(number)
+      to_port           = optional(number)
+      cidr_ipv4         = optional(string)
+      prefix_list_name  = optional(string)
+      referenced_sg_key = optional(string)
+    }))
+  }))
+
+  default = {}
+}

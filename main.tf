@@ -14,3 +14,10 @@ module "network" {
   nacl_static_rules  = var.nacl_static_rules
   nacl_dynamic_rules = var.nacl_dynamic_rules
 }
+
+module "security" {
+  source = "./modules/security"
+
+  vpc_id = module.network.vpc_id
+  security_groups_rules = var.security_groups_rules
+}
