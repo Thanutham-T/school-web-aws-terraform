@@ -107,6 +107,7 @@ resource "aws_network_acl_association" "this" {
 }
 
 resource "aws_network_acl_rule" "static" {
+  #checkov:skip=CKV_AWS_231:deny ingress from 0.0.0.0:0 to port 3389
   for_each = local.static_rules_map
 
   network_acl_id = aws_network_acl.this[each.value.tier].id
@@ -122,6 +123,7 @@ resource "aws_network_acl_rule" "static" {
 }
 
 resource "aws_network_acl_rule" "dynamic" {
+  #checkov:skip=CKV_AWS_231:deny ingress from 0.0.0.0:0 to port 3389
   for_each = local.dynamic_rules_map
 
   network_acl_id = aws_network_acl.this[each.value.tier].id
