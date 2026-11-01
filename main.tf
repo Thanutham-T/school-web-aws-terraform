@@ -1,12 +1,3 @@
-data "aws_availability_zones" "available" {
-  state = "available"
-
-  filter {
-    name   = "zone-name"
-    values = ["${var.region}${var.zone_suffix[0]}", "${var.region}${var.zone_suffix[1]}"]
-  }
-}
-
 module "network" {
   source = "./modules/network"
 
@@ -14,7 +5,12 @@ module "network" {
   vpc_cidr_block             = var.vpc_cidr_block
   public_subnet_cidr_blocks  = var.public_subnet_cidr_blocks
   private_subnet_cidr_blocks = var.private_subnet_cidr_blocks
-  availability_zones         = data.aws_availability_zones.available.names
+  availability_zones         = var.availability_zones
 
+  enable_flow_logs         = var.enable_flow_logs
+  flow_logs_retention_days = var.flow_logs_retention_days
+  gateway_vpc_endpoints    = var.gateway_vpc_endpoints
+
+  nacl_static_rules  = var.nacl_static_rules
+  nacl_dynamic_rules = var.nacl_dynamic_rules
 }
-  
