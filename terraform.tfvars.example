@@ -1,0 +1,88 @@
+region                    = "ap-southeast-1"
+project                   = "school-web"
+environment               = "dev"
+managed_by                = "terraform"
+vpc_cidr_block            = "10.0.0.0/16"
+public_subnet_cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidr_blocks = {
+  app = ["10.0.11.0/24", "10.0.12.0/24"]
+  db  = ["10.0.21.0/24", "10.0.22.0/24"]
+}
+
+nacl_static_rules = {
+  public = [
+    { id = "in_https_from_internet", rule_number = 100, egress = false, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443, to_port = 443 },
+    { id = "in_ephemeral_from_internet", rule_number = 110, egress = false, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
+    { id = "in_icmp_pmtud", rule_number = 120, egress = false, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+    { id = "out_https_to_internet", rule_number = 100, egress = true, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443, to_port = 443 },
+    { id = "out_ephemeral_to_internet", rule_number = 110, egress = true, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
+    { id = "out_icmp_pmtud", rule_number = 120, egress = true, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+  ]
+
+  app = [
+    { id = "in_ephemeral_from_internet", rule_number = 110, egress = false, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
+    { id = "in_icmp_pmtud", rule_number = 120, egress = false, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+    { id = "out_https_to_internet", rule_number = 100, egress = true, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443, to_port = 443 },
+    { id = "out_icmp_pmtud", rule_number = 120, egress = true, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+  ]
+
+  db = [
+    { id = "in_icmp_pmtud", rule_number = 120, egress = false, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+    { id = "out_icmp_pmtud", rule_number = 120, egress = true, protocol = "icmp", cidr_block = "0.0.0.0/0", icmp_type = 3, icmp_code = 4 },
+  ]
+}
+
+nacl_dynamic_rules = {
+  public = [
+    { id = "out_http_to_app", rule_number = 300, egress = true, protocol = "tcp", subnet_group = "app", from_port = 80, to_port = 80 },
+  ]
+
+  app = [
+    { id = "in_http_from_public", rule_number = 300, egress = false, protocol = "tcp", subnet_group = "public", from_port = 80, to_port = 80 },
+    { id = "out_mysql_to_db", rule_number = 300, egress = true, protocol = "tcp", subnet_group = "db", from_port = 3306, to_port = 3306 },
+    { id = "out_eph_to_public", rule_number = 310, egress = true, protocol = "tcp", subnet_group = "public", from_port = 1024, to_port = 65535 },
+  ]
+
+  db = [
+    { id = "in_mysql_from_app", rule_number = 300, egress = false, protocol = "tcp", subnet_group = "app", from_port = 3306, to_port = 3306 },
+    { id = "out_eph_to_app", rule_number = 300, egress = true, protocol = "tcp", subnet_group = "app", from_port = 1024, to_port = 65535 },
+  ]
+}
+
+security_groups_rules = {
+  alb = {
+    name        = "myapp-prod-alb-sg"
+    description = "ALB SG - accepts HTTPS from CloudFront only"
+    rules = {
+      in-https-cloudfront = { direction = "ingress", protocol = "tcp", from_port = 443, to_port = 443, prefix_list_name = "com.amazonaws.global.cloudfront.origin-facing", description = "HTTPS from CloudFront" }
+      out-http-app        = { direction = "egress", protocol = "tcp", from_port = 80, to_port = 80, referenced_sg_key = "app", description = "HTTP to app tier" }
+    }
+  }
+
+  app = {
+    name        = "myapp-prod-app-sg"
+    description = "app tier SG - accepts traffic from ALB only"
+    rules = {
+      in-http-alb   = { direction = "ingress", protocol = "tcp", from_port = 80, to_port = 80, referenced_sg_key = "alb", description = "HTTP from ALB" }
+      out-https-nat = { direction = "egress", protocol = "tcp", from_port = 443, to_port = 443, cidr_ipv4 = "0.0.0.0/0", description = "HTTPS to internet via NAT" }
+      out-mysql-db  = { direction = "egress", protocol = "tcp", from_port = 3306, to_port = 3306, referenced_sg_key = "db", description = "MySQL to DB tier" }
+      out-nfs-efs   = { direction = "egress", protocol = "tcp", from_port = 2049, to_port = 2049, referenced_sg_key = "efs", description = "NFS to EFS" }
+    }
+  }
+
+  efs = {
+    name        = "myapp-prod-efs-sg"
+    description = "EFS SG - accepts NFS from app tier only"
+    rules = {
+      in-nfs-app = { direction = "ingress", protocol = "tcp", from_port = 2049, to_port = 2049, referenced_sg_key = "app", description = "NFS from app tier" }
+    }
+  }
+
+  db = {
+    name        = "myapp-prod-db-sg"
+    description = "RDS SG - accepts MySQL from app tier only"
+    rules = {
+      in-mysql-app = { direction = "ingress", protocol = "tcp", from_port = 3306, to_port = 3306, referenced_sg_key = "app", description = "MySQL from app tier" }
+    }
+  }
+}
