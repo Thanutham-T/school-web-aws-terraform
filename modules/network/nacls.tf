@@ -44,7 +44,7 @@ resource "aws_network_acl" "all_tiers" {
   for_each = local.tier_subnets
 
   vpc_id     = aws_vpc.this.id
-  subnet_ids = local.tier_subnets[each.key]
+  subnet_ids = each.value
 
   tags = {
     Name = "${var.project}-${each.key}-nacl"
