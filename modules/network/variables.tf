@@ -61,37 +61,73 @@ variable "availability_zones" {
 }
 
 # ------------------------------------------------------------------
-# Variable: app_port
-# Purpose: Port used for HTTP app traffic.
-# Type: number
-# Default: 80
+# Variable: nacl_static_rules
+# Purpose: Rules with a fixed CIDR (e.g. 0.0.0.0/0)
 # ------------------------------------------------------------------
-variable "app_port" {
-  description = "Port used for HTTP app traffic"
-  type        = number
-  default     = 80
+variable "nacl_static_rules" {
+  description = "NACL rules with a fixed CIDR block per tier"
+  type = map(list(object({
+    id          = string
+    rule_number = number
+    egress      = bool
+    protocol    = string
+    cidr_block  = string
+    from_port   = number
+    to_port     = number
+  })))
+
+  default = {
+    "public" = [
+      # Inbound
+      { id = "in_https_anywhere",    rule_number = 100, egress = false, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443,  to_port = 443   },
+      { id = "in_ephemeral",         rule_number = 110, egress = false, protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
+      # Outbound
+      { id = "out_https_anywhere",   rule_number = 110, egress = true,  protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443,  to_port = 443   },
+      { id = "out_ephemeral",        rule_number = 120, egress = true,  protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 1024, to_port = 65535 },
+    ],
+    "app" = [
+      # Outbound
+      { id = "out_https_anywhere",   rule_number = 100, egress = true,  protocol = "tcp", cidr_block = "0.0.0.0/0", from_port = 443,  to_port = 443   },
+    ],
+    "db" = []
+  }
 }
 
 # ------------------------------------------------------------------
-# Variable: https_port
-# Purpose: Port used for HTTPS app traffic.
-# Type: number
-# Default: 443
+# Variable: nacl_dynamic_rules
+# Purpose: Rules that expand per-subnet CIDR (one rule per AZ)
 # ------------------------------------------------------------------
-variable "https_port" {
-  description = "Port used for HTTPS app traffic"
-  type        = number
-  default     = 443
-}
+variable "nacl_dynamic_rules" {
+  description = "NACL rules that iterate over a subnet group's CIDRs"
+  type = map(list(object({
+    id           = string
+    rule_number  = number  # base number — offset by AZ index automatically
+    egress       = bool
+    protocol     = string
+    subnet_group = string  # references local.subnet_cidrs key
+    from_port    = number
+    to_port      = number
+  })))
 
-# ------------------------------------------------------------------
-# Variable: db_port
-# Purpose: Port used for MySQL database traffic.
-# Type: number
-# Default: 3306
-# ------------------------------------------------------------------
-variable "db_port" {
-  description = "Port used for MySQL database traffic"
-  type        = number
-  default     = 3306
+  default = {
+    "public" = [
+      # Outbound
+      { id = "out_http_to_app",      rule_number = 100, egress = true,  protocol = "tcp", subnet_group = "app",    from_port = 80,   to_port = 80    },
+    ],
+    "app" = [
+      # Inbound
+      { id = "in_http_from_public",  rule_number = 100, egress = false, protocol = "tcp", subnet_group = "public", from_port = 80,   to_port = 80    },
+      { id = "in_eph_from_public",   rule_number = 110, egress = false, protocol = "tcp", subnet_group = "public", from_port = 1024, to_port = 65535 },
+      { id = "in_eph_from_db",       rule_number = 120, egress = false, protocol = "tcp", subnet_group = "db",     from_port = 1024, to_port = 65535 },
+      # Outbound
+      { id = "out_mysql_to_db",      rule_number = 110, egress = true,  protocol = "tcp", subnet_group = "db",     from_port = 3306, to_port = 3306  },
+      { id = "out_eph_to_public",    rule_number = 120, egress = true,  protocol = "tcp", subnet_group = "public", from_port = 1024, to_port = 65535 },
+    ],
+    "db" = [
+      # Inbound
+      { id = "in_mysql_from_app",    rule_number = 100, egress = false, protocol = "tcp", subnet_group = "app",    from_port = 3306, to_port = 3306  },
+      # Outbound
+      { id = "out_eph_to_app",       rule_number = 100, egress = true,  protocol = "tcp", subnet_group = "app",    from_port = 1024, to_port = 65535 },
+    ]
+  }
 }
