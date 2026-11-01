@@ -14,6 +14,13 @@ This Terraform module provisions a foundational AWS network layout:
 
 The module is designed to be reusable across environments and projects.
 
+## File Structure
+* `vpc.tf` – VPC, default security group, internet gateway, and NAT gateway.
+* `subnets.tf` – Subnet locals and public/private subnet resources.
+* `route_tables.tf` – Route tables and subnet associations.
+* `nacls.tf` – Network ACLs and their rules (variable-driven via `nacl_static_rules` and `nacl_dynamic_rules`).
+* `variables.tf`, `outputs.tf`, and `versions.tf` – Module inputs, outputs, and version constraints.
+
 ## Usage
 ```hcl
 module "network" {
@@ -24,6 +31,10 @@ module "network" {
   public_subnet_cidr_blocks  = var.public_subnet_cidr_blocks
   private_subnet_cidr_blocks = var.private_subnet_cidr_blocks
   availability_zones         = var.availability_zones
+
+  # Optional: customize NACL rules
+  # nacl_static_rules  = { ... }
+  # nacl_dynamic_rules = { ... }
 }
 ```
 
@@ -35,6 +46,8 @@ module "network" {
 | public_subnet_cidr_blocks | `list(string)` | CIDR blocks for public subnets (one per AZ). | `["10.0.1.0/24","10.0.2.0/24"]` | no |
 | private_subnet_cidr_blocks | `object({app=list(string), db=list(string)})` | CIDR blocks for private subnets per tier. | — | **yes** |
 | availability_zones | `list(string)` | AZ names to distribute subnets. | `["ap-southeast-1a","ap-southeast-1b"]` | no |
+| nacl_static_rules | `map(list(object(...)))` | NACL rules with fixed CIDR blocks (e.g., 0.0.0.0/0) per tier. | See `variables.tf` | no |
+| nacl_dynamic_rules | `map(list(object(...)))` | NACL rules that expand per-subnet CIDR (one rule per AZ). | See `variables.tf` | no |
 
 ## Outputs
 | Name | Description |
@@ -44,6 +57,7 @@ module "network" {
 | nat_gateway_id | ID of the NAT Gateway. |
 | public_subnet_ids | List of public subnet IDs. |
 | private_subnet_ids | List of private subnet IDs (app + db). |
+| subnet_ids | List of all public and private subnet IDs. |
 | public_route_table_id | ID of the public route table. |
 | private_route_table_id | ID of the private route table. |
 
@@ -53,39 +67,61 @@ module "network" {
 * Private subnets have **no direct internet access**; outbound via NAT gateway.
 
 ### Network ACLs
-Three stateless Network ACLs are created and **attached to their subnets using the actual subnet IDs** (`[for s in aws_subnet.public : s.id]` for public, `[for s in aws_subnet.private : s.id if s.tags.Tier == "app"]` for app, and `[for s in aws_subnet.private : s.id if s.tags.Tier == "db"]` for db), ensuring compliance with **CKV2_AWS_1**.
+Three stateless Network ACLs are created (public, app, db) using a single `aws_network_acl.all_tiers` resource with `for_each` over `local.tier_subnets`. Subnet associations use the actual subnet IDs:
+- Public: `values(aws_subnet.public)[*].id`
+- App: `[for s in aws_subnet.private : s.id if s.tags.Tier == "app"]`
+- DB: `[for s in aws_subnet.private : s.id if s.tags.Tier == "db"]`
 
-#### Public NACL (`aws_network_acl.public`)
-| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
-|-----------------|-----------|----------|------------|------|--------|
-| `public_in_https_from_anywhere` | ingress | tcp | 443 | 0.0.0.0/0 | Allow HTTPS from Internet to public subnets (e.g., CloudFront → ALB) |
-| `public_in_ephemeral_from_anywhere_low` | ingress | tcp | 1024‑3388 | 0.0.0.0/0 | Allow return traffic on low‑ephemeral ports (excludes RDP 3389) |
-| `public_in_ephemeral_from_anywhere_high` | ingress | tcp | 3390‑65535 | 0.0.0.0/0 | Allow return traffic on high‑ephemeral ports (excludes RDP 3389) |
-| `public_out_http_to_app` | egress | tcp | 80 | each app subnet CIDR | Allow HTTP from public subnets to app subnets (ALB → App) |
-| `public_out_https_to_anywhere` | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS from public subnets (e.g., NAT GW → Internet) |
-| `public_out_ephemeral_to_anywhere` | egress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow outbound ephemeral return traffic |
+This ensures compliance with **CKV2_AWS_1**.
 
-*The inbound ephemeral‑port rule was split into two rules (110 & 111) to explicitly deny TCP 3389 (RDP), satisfying Checkov policy **CKV_AWS_231**.*
+#### Rule Configuration
+NACL rules are defined via two variable maps for maximum flexibility:
 
-#### App NACL (`aws_network_acl.app`)
-| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
-|-----------------|-----------|----------|------------|------|--------|
-| `app_in_http_from_public` | ingress | tcp | 80 | each public subnet CIDR | Allow HTTP from public subnets (ALB → App) |
-| `app_in_ephemeral_from_public` | ingress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral return traffic from public subnets |
-| `app_in_ephemeral_from_db` | ingress | tcp | 1024‑65535 | each db subnet CIDR | Allow ephemeral traffic from db subnets |
-| `app_out_https_to_anywhere` | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS (App → NAT GW → Internet) |
-| `app_out_mysql_to_db` | egress | tcp | 3306 | each db subnet CIDR | Allow MySQL from app to db subnets |
-| `app_out_ephemeral_to_public` | egress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral return traffic to public subnets |
+**Static Rules** (`nacl_static_rules`) – Fixed CIDR (e.g., `0.0.0.0/0`):
+- Public ingress: HTTPS (443), Ephemeral (1024‑65535)
+- Public egress: HTTPS (443), Ephemeral (1024‑65535)
+- App egress: HTTPS (443)
+- DB: (none by default)
 
-#### DB NACL (`aws_network_acl.db`)
-| Rule (resource) | Direction | Protocol | Port range | CIDR | Intent |
-|-----------------|-----------|----------|------------|------|--------|
-| `db_in_mysql_from_app` | ingress | tcp | 3306 | each app subnet CIDR | Allow MySQL from app subnets |
-| `db_out_ephemeral_to_app` | egress | tcp | 1024‑65535 | each app subnet CIDR | Allow ephemeral return traffic to app subnets |
+**Dynamic Rules** (`nacl_dynamic_rules`) – One rule per AZ subnet CIDR:
+- Public egress: HTTP (80) → each app subnet CIDR
+- App ingress: HTTP (80) from each public subnet, Ephemeral (1024‑65535) from public & db subnets
+- App egress: MySQL (3306) → each db subnet, Ephemeral (1024‑65535) → each public subnet
+- DB ingress: MySQL (3306) from each app subnet
+- DB egress: Ephemeral (1024‑65535) → each app subnet
 
-*Rule numbers are generated deterministically (`100 + index(...)`) so ordering is stable across applies. CIDR sources/destinations are driven by the same `local.*_subnets` maps used for subnet creation, ensuring automatic updates when CIDR blocks change.*
+Rule numbers use a base (`rule_number` in variable) plus AZ index offset (0, 1, 2…) for deterministic ordering across applies. For example, base `100` becomes `100`, `101`, `102` for three AZs.
 
-> **Tip** – To add extra ports (e.g., TCP 8080 for a side‑car proxy) extend the `local.app_subnets` / `local.db_subnets` maps or create a new `aws_network_acl_rule` resource that references the same `aws_network_acl.app` / `aws_network_acl.db` IDs. Rule numbers are auto‑calculated, so you only need to choose a free `rule_number` range.
+> **Tip** – To add extra ports (e.g., TCP 8080 for a side‑car proxy), extend `nacl_static_rules` or `nacl_dynamic_rules` in your module call. Choose a free `rule_number` range; the AZ offset is applied automatically for dynamic rules.
+
+## Default NACL Rules Summary
+
+#### Public NACL
+| Rule ID | Direction | Protocol | Port Range | CIDR | Intent |
+|---------|-----------|----------|------------|------|--------|
+| in_https_anywhere | ingress | tcp | 443 | 0.0.0.0/0 | Allow HTTPS from Internet |
+| in_ephemeral | ingress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow return traffic on ephemeral ports |
+| out_https_anywhere | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS |
+| out_ephemeral | egress | tcp | 1024‑65535 | 0.0.0.0/0 | Allow outbound ephemeral return traffic |
+| out_http_to_app (×AZ) | egress | tcp | 80 | each app subnet CIDR | Allow HTTP to app subnets |
+
+#### App NACL
+| Rule ID | Direction | Protocol | Port Range | CIDR | Intent |
+|---------|-----------|----------|------------|------|--------|
+| out_https_anywhere | egress | tcp | 443 | 0.0.0.0/0 | Allow outbound HTTPS |
+| in_http_from_public (×AZ) | ingress | tcp | 80 | each public subnet CIDR | Allow HTTP from public subnets |
+| in_eph_from_public (×AZ) | ingress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral from public |
+| in_eph_from_db (×AZ) | ingress | tcp | 1024‑65535 | each db subnet CIDR | Allow ephemeral from db |
+| out_mysql_to_db (×AZ) | egress | tcp | 3306 | each db subnet CIDR | Allow MySQL to db |
+| out_eph_to_public (×AZ) | egress | tcp | 1024‑65535 | each public subnet CIDR | Allow ephemeral to public |
+
+#### DB NACL
+| Rule ID | Direction | Protocol | Port Range | CIDR | Intent |
+|---------|-----------|----------|------------|------|--------|
+| in_mysql_from_app (×AZ) | ingress | tcp | 3306 | each app subnet CIDR | Allow MySQL from app |
+| out_eph_to_app (×AZ) | egress | tcp | 1024‑65535 | each app subnet CIDR | Allow ephemeral to app |
+
+*(×AZ) indicates one rule per availability zone, with rule_number = base + AZ index.*
 
 ## Dependencies
 * Terraform **>= 1.17.1**  
