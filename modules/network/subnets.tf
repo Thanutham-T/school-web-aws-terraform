@@ -1,23 +1,13 @@
-## =================================================================
-## Subnet Resources
-## =================================================================
-
-# ------------------------------------------------------------------
-# Locals: subnet mapping helpers
-# Purpose: Compute subnet-to-AZ mappings for public, app, and db tiers,
-#          and merge private tiers into a single map for iteration.
-# Key outputs: public_subnets, app_subnets, db_subnets, all_private_subnets
-# ------------------------------------------------------------------
 locals {
   public_subnets = {
     for idx, cidr in var.public_subnet_cidr_blocks :
-    cidr => var.availability_zones[idx % length(var.availability_zones)]
+    cidr => var.availability_zones[idx]
   }
 
   app_subnets = {
     for idx, cidr in var.private_subnet_cidr_blocks.app :
     cidr => {
-      az   = var.availability_zones[idx % length(var.availability_zones)],
+      az   = var.availability_zones[idx]
       tier = "app"
     }
   }
@@ -25,7 +15,7 @@ locals {
   db_subnets = {
     for idx, cidr in var.private_subnet_cidr_blocks.db :
     cidr => {
-      az   = var.availability_zones[idx % length(var.availability_zones)],
+      az   = var.availability_zones[idx]
       tier = "db"
     }
   }
@@ -33,12 +23,8 @@ locals {
   all_private_subnets = merge(local.app_subnets, local.db_subnets)
 }
 
-# ------------------------------------------------------------------
-# Resource: aws_subnet.public
-# Purpose: Create public subnets in each AZ with no public IP assignment.
-# Compliance: Public subnets must not auto-assign public IPs; routing is via IGW.
-# Key arguments: for_each over local.public_subnets, vpc_id, cidr_block, availability_zone, map_public_ip_on_launch.
-# ------------------------------------------------------------------
+# Inputs are validated to have one CIDR per AZ, so the index maps directly
+# to an AZ without a modulo fallback that could stack subnets in one AZ.
 resource "aws_subnet" "public" {
   for_each                = local.public_subnets
   vpc_id                  = aws_vpc.this.id
@@ -46,17 +32,13 @@ resource "aws_subnet" "public" {
   availability_zone       = each.value
   map_public_ip_on_launch = false
 
-  tags = {
-    Name = "${var.project}-public-subnet-${each.key}"
-  }
+  tags = merge(var.tags, {
+    Name = "${var.project}-public-${each.value}"
+    Tier = "public"
+  })
 }
 
-# ------------------------------------------------------------------
-# Resource: aws_subnet.private
-# Purpose: Create private subnets in each AZ for app and db tiers.
-# Compliance: Private subnets must not auto-assign public IPs; routing is via NAT gateway.
-# Key arguments: for_each over local.all_private_subnets, vpc_id, cidr_block, availability_zone, map_public_ip_on_launch.
-# ------------------------------------------------------------------  
+# Same one-CIDR-per-AZ guarantee as the public subnets.
 resource "aws_subnet" "private" {
   for_each                = local.all_private_subnets
   vpc_id                  = aws_vpc.this.id
@@ -64,8 +46,8 @@ resource "aws_subnet" "private" {
   availability_zone       = each.value.az
   map_public_ip_on_launch = false
 
-  tags = {
-    Name = "${var.project}-private-subnet-${each.value.tier}-${each.key}"
+  tags = merge(var.tags, {
+    Name = "${var.project}-${each.value.tier}-${each.value.az}"
     Tier = each.value.tier
-  }
+  })
 }
