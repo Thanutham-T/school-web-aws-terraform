@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-labelledby="title description">
+  <title id="title">School Web AWS network architecture</title>
+  <desc id="description">A Terraform-managed AWS VPC across two Availability Zones, with public, app-private, and database-private subnet tiers, an Internet Gateway, a regional NAT Gateway, private gateway endpoints, security groups, and encrypted VPC Flow Logs.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #172b4d; }
+      .title { font-size: 30px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #42526e; }
+      .vpc { fill: #f7f9fc; stroke: #4263a5; stroke-width: 3; }
+      .az { fill: #fff; stroke: #9aaed1; stroke-width: 2; }
+      .box { fill: #fff; stroke: #7a8eae; stroke-width: 1.5; rx: 10; }
+      .public { fill: #e8f4ff; stroke: #2684ff; }
+      .app { fill: #e8f7f1; stroke: #36a87b; }
+      .db { fill: #f1edff; stroke: #7965c1; }
+      .shared { fill: #fff8e6; stroke: #d49b22; }
+      .observability { fill: #fff0ed; stroke: #de6b56; }
+      .shield { fill: #e8f7f1; stroke: #23845f; stroke-width: 3; }
+      .section { font-size: 18px; font-weight: 700; }
+      .label { font-size: 15px; font-weight: 700; }
+      .detail { font-size: 13px; fill: #42526e; }
+      .small { font-size: 12px; fill: #5e6c84; }
+      .line { fill: none; stroke: #526783; stroke-width: 2.5; }
+      .dashed { stroke-dasharray: 7 6; }
+      .arrow { marker-end: url(#arrow); }
+      .footer { font-size: 13px; fill: #5e6c84; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#526783" />
+    </marker>
+  </defs>
+
+  <rect width="1280" height="900" fill="#fff" />
+  <text x="50" y="52" class="title">School Web AWS Network</text>
+  <text x="50" y="80" class="subtitle">Terraform-managed foundation · default topology spans two Availability Zones</text>
+
+  <rect x="38" y="112" width="1204" height="700" rx="20" class="vpc" />
+  <text x="66" y="151" class="section">AWS VPC · 10.0.0.0/16 (default)</text>
+  <text x="66" y="174" class="small">DNS support and hostnames enabled · tier-specific network ACLs</text>
+
+  <rect x="65" y="202" width="340" height="570" rx="16" class="az" />
+  <text x="86" y="235" class="section">Availability Zone A</text>
+  <text x="86" y="257" class="small">ap-southeast-1a (default)</text>
+
+  <rect x="425" y="202" width="340" height="570" rx="16" class="az" />
+  <text x="446" y="235" class="section">Availability Zone B</text>
+  <text x="446" y="257" class="small">ap-southeast-1b (default)</text>
+
+  <rect x="85" y="278" width="300" height="100" rx="12" class="box public" />
+  <text x="105" y="310" class="label">Public subnet</text>
+  <text x="105" y="334" class="detail">10.0.1.0/24 · route via IGW</text>
+  <text x="105" y="356" class="small">Public-tier NACL · no public IP auto-assign</text>
+
+  <rect x="445" y="278" width="300" height="100" rx="12" class="box public" />
+  <text x="465" y="310" class="label">Public subnet</text>
+  <text x="465" y="334" class="detail">10.0.2.0/24 · route via IGW</text>
+  <text x="465" y="356" class="small">Public-tier NACL · no public IP auto-assign</text>
+
+  <rect x="85" y="408" width="300" height="100" rx="12" class="box app" />
+  <text x="105" y="440" class="label">Private app subnet</text>
+  <text x="105" y="464" class="detail">Example: 10.0.11.0/24</text>
+  <text x="105" y="486" class="small">App-tier NACL · default route via NAT</text>
+
+  <rect x="445" y="408" width="300" height="100" rx="12" class="box app" />
+  <text x="465" y="440" class="label">Private app subnet</text>
+  <text x="465" y="464" class="detail">Example: 10.0.12.0/24</text>
+  <text x="465" y="486" class="small">App-tier NACL · default route via NAT</text>
+
+  <rect x="85" y="538" width="300" height="100" rx="12" class="box db" />
+  <text x="105" y="570" class="label">Private database subnet</text>
+  <text x="105" y="594" class="detail">Example: 10.0.21.0/24</text>
+  <text x="105" y="616" class="small">DB-tier NACL · no default internet route</text>
+
+  <rect x="445" y="538" width="300" height="100" rx="12" class="box db" />
+  <text x="465" y="570" class="label">Private database subnet</text>
+  <text x="465" y="594" class="detail">Example: 10.0.22.0/24</text>
+  <text x="465" y="616" class="small">DB-tier NACL · no default internet route</text>
+
+  <rect x="85" y="666" width="660" height="76" rx="12" class="box shared" />
+  <text x="105" y="695" class="label">Routing and internet egress</text>
+  <text x="105" y="719" class="detail">Public route table → Internet Gateway · app route tables → regional NAT Gateway</text>
+
+  <rect x="790" y="202" width="425" height="164" rx="14" class="box shared" />
+  <text x="815" y="235" class="section">Internet and private routing</text>
+  <text x="815" y="271" class="label">Public subnets → Internet Gateway</text>
+  <text x="815" y="296" class="detail">App subnets → regional NAT Gateway → Internet Gateway</text>
+  <text x="815" y="322" class="detail">S3 and DynamoDB gateway endpoints → private route tables</text>
+  <text x="815" y="345" class="small">DB tier has no default route to the internet</text>
+
+  <rect x="790" y="388" width="425" height="164" rx="14" class="box app" />
+  <text x="815" y="421" class="section">Security groups · stateful, ENI-level</text>
+  <path d="M 838 439 L 861 447 L 859 470 C 858 484 849 493 838 499 C 827 493 818 484 817 470 L 815 447 Z" class="shield" />
+  <path d="M 827 466 L 835 474 L 850 457" fill="none" stroke="#23845f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <text x="875" y="456" class="label">Configurable ingress / egress rules</text>
+  <text x="875" y="480" class="detail">Sources: IPv4 CIDR, managed prefix list,</text>
+  <text x="875" y="501" class="detail">or another security group</text>
+  <text x="815" y="528" class="small">Applied to resource network interfaces, not subnets. IDs are exported;</text>
+  <text x="815" y="544" class="small">workloads are not deployed or attached in this root configuration.</text>
+
+  <rect x="790" y="574" width="425" height="168" rx="14" class="box observability" />
+  <text x="815" y="607" class="section">VPC Flow Logs (enabled by default)</text>
+  <text x="815" y="643" class="label">VPC traffic → CloudWatch Logs</text>
+  <text x="815" y="668" class="detail">Dedicated KMS key with automatic rotation</text>
+  <text x="815" y="694" class="detail">Default retention: 365 days</text>
+  <text x="815" y="719" class="small">IAM role and least-privilege log-write policy are provisioned</text>
+
+  <text x="50" y="850" class="footer">Note: NACL rule maps default to empty (deny all). Configure rules for required traffic before deployment.</text>
+  <text x="50" y="875" class="footer">The reusable EFS module is not wired into the root configuration; no web app, load balancer, or compute is deployed.</text>
+</svg>
